@@ -429,4 +429,4 @@ def setup(bot):
     elif not tabulateAvailable:
         raise RuntimeError("You need to run \'pip3 install tabulate\' in command prompt.")
     else:
-		bot.add_cog(Pokedex(bot))
+        bot.add_cog(Pokedex(bot))
