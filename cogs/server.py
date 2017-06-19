@@ -33,7 +33,7 @@ class Server:
     # Stats about server
     @commands.group(pass_context=True)
     async def server(self, ctx):
-        """Various info about the server. See the wiki for more info."""
+        """Various info about the server. >help server for more info."""
         if ctx.invoked_subcommand is None:
             pre = cmd_prefix_len()
             if ctx.message.content[6 + pre:].strip():
@@ -63,13 +63,19 @@ class Server:
                 all_users.append('{}#{}'.format(user.name, user.discriminator))
             all_users.sort()
             all = '\n'.join(all_users)
+
+            channel_count = 0
+            for channel in server.channels:
+                if channel.type == discord.ChannelType.text:
+                    channel_count += 1
+
             if embed_perms(ctx.message):
                 em = discord.Embed(color=0xea7938)
                 em.add_field(name='Name', value=server.name)
                 em.add_field(name='Owner', value=server.owner, inline=False)
                 em.add_field(name='Members', value=server.member_count)
                 em.add_field(name='Currently Online', value=online)
-                em.add_field(name='Channels', value=str(len(server.channels)))
+                em.add_field(name='Text Channels', value=str(channel_count))
                 em.add_field(name='Region', value=server.region)
                 em.add_field(name='Verification Level', value=str(server.verification_level))
                 em.add_field(name='Highest role', value=server.role_hierarchy[0])
@@ -79,6 +85,7 @@ class Server:
                 em.add_field(name='Created At', value=server.created_at.__format__('%A, %d. %B %Y @ %H:%M:%S'))
                 em.set_thumbnail(url=server.icon_url)
                 em.set_author(name='Server Info', icon_url='https://i.imgur.com/RHagTDg.png')
+                em.set_footer(text='Server ID: %s' % server.id)
                 await self.bot.send_message(ctx.message.channel, embed=em)
             else:
                 msg = '**Server Info:** ```Name: %s\nOwner: %s\nMembers: %s\nCurrently Online: %s\nRegion: %s\nVerification Level: %s\nHighest Role: %s\nDefault Channel: %s\nCreated At: %s\nServer avatar: : %s```' % (

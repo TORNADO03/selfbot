@@ -18,6 +18,7 @@ from discord.ext import commands
 
 config = load_config()
 
+
 bot_prefix = config['bot_identifier']
 if bot_prefix != '':
     bot_prefix += ' '
@@ -43,6 +44,7 @@ async def on_ready():
     bot.is_stream = False
     bot.game = bot.game_interval = bot.avatar = bot.avatar_interval = bot.subpro = bot.keyword_found = None
     bot.game_time = bot.avatar_time = bot.gc_time = bot.refresh_time = time.time()
+    bot.notify = load_notify_config()
 
     if os.path.isfile('restart.txt'):
         with open('restart.txt', 'r') as re:
@@ -53,6 +55,18 @@ async def on_ready():
     with open('settings/log.json', 'r') as log:
         bot.log_conf = json.load(log)
         bot.key_users = bot.log_conf['keyusers']
+    if not os.path.isfile('settings/moderation.json'):
+        with open('settings/moderation.json', 'w') as m:
+            mod = {}
+            json.dump(mod, m, indent=4)
+    if not os.path.isfile('settings/todo.json'):
+        with open('settings/todo.json', 'w') as t:
+            todo = {}
+            json.dump(todo, t, indent=4)
+
+    if os.path.isfile('cogs/online_users.py'):
+        os.remove('cogs/online_users.py')
+
     if os.path.isfile('settings/games.json'):
         with open('settings/games.json', 'r+') as g:
             games = json.load(g)
@@ -68,6 +82,8 @@ async def on_ready():
             g.seek(0)
             g.truncate()
             json.dump(games, g, indent=4)
+
+    # Dealing with old versions updating
     if not os.path.exists('avatars'):
         os.makedirs('avatars')
     if not os.path.isfile('settings/avatars.json'):
@@ -88,6 +104,10 @@ async def on_ready():
             json.dump(o_conf, oc, indent=4)
     with open('settings/optional_config.json', 'r+') as fp:
         opt = json.load(fp)
+        if 'embed_color' not in opt:
+            opt['embed_color'] = ''
+        if 'quoteembed_color' not in opt:
+            opt['quoteembed_color'] = 'bc0b0b'
         if 'customcmd_color' not in opt:
             opt['customcmd_color'] = '27007A'
         if 'rich_embed' not in opt:
@@ -96,6 +116,8 @@ async def on_ready():
             opt['default_status'] = 'idle'
         if 'ascii_font' not in opt:
             opt['ascii_font'] = 'big'
+        if 'online_stats' not in opt:
+            opt['online_stats'] = 'on'
         fp.seek(0)
         fp.truncate()
         json.dump(opt, fp, indent=4)
@@ -128,10 +150,10 @@ async def restart(ctx):
     if latest:
         await bot.send_message(ctx.message.channel, bot_prefix + 'There is an update available for the bot. Download and apply the update on restart? (y/n)')
         reply = await bot.wait_for_message(timeout=10, author=ctx.message.author, check=check)
+        with open('restart.txt', 'w') as re:
+            re.write(str(ctx.message.channel.id))
         if not reply or reply.content.lower().strip() == 'n':
-            with open('restart.txt', 'w') as re:
-                print('Restarting...')
-                re.write(str(ctx.message.channel.id))
+            print('Restarting...')
             await bot.send_message(ctx.message.channel, bot_prefix + 'Restarting...')
         else:
             await bot.send_message(ctx.message.channel, content=None, embed=latest)
@@ -219,7 +241,8 @@ async def on_message(message):
 
     # If the message was sent by me
     if message.author.id == bot.user.id:
-        bot.icount += 1
+        if hasattr(bot, 'icount'):
+            bot.icount += 1
         if hasattr(bot, 'self_log'):
             if message.channel.id not in bot.self_log:
                 bot.self_log[message.channel.id] = collections.deque(maxlen=100)
@@ -340,7 +363,6 @@ async def on_message(message):
                         msg = 'User: %s | %s\n' % (message.author.name, message.timestamp.replace(tzinfo=timezone.utc).astimezone(tz=None).__format__('%x @ %X')) + msg
 
                     part = int(math.ceil(len(msg) / 1950))
-                    notify = load_notify_config()
                     if user_found:
                         title = '%s posted' % user_found
                     else:
@@ -356,9 +378,9 @@ async def on_message(message):
                             em.set_thumbnail(url=message.author.avatar_url)
                         except:
                             pass
-                        if notify['type'] == 'msg':
+                        if bot.notify['type'] == 'msg':
                             await webhook(em, 'embed', is_separate)
-                        elif notify['type'] == 'ping':
+                        elif bot.notify['type'] == 'ping':
                             await webhook(em, 'embed ping', is_separate)
                         else:
                             await bot.send_message(server.get_channel(location[0]), embed=em)
@@ -377,16 +399,16 @@ async def on_message(message):
                             logged_msg = '``%s`` mentioned' % word
                         for b, i in enumerate(all_words):
                             if b == 0:
-                                if notify['type'] == 'msg':
+                                if bot.notify['type'] == 'msg':
                                     await webhook(bot_prefix + '%s in server: ``%s`` Context: ```Channel: %s\n\n%s```' % (logged_msg, str(message.server), str(message.channel), i), 'message', is_separate)
-                                elif notify['type'] == 'ping':
+                                elif bot.notify['type'] == 'ping':
                                     await webhook(bot_prefix + '%s in server: ``%s`` Context: ```Channel: %s\n\n%s```' % (logged_msg, str(message.server), str(message.channel), i), 'message ping', is_separate)
                                 else:
                                     await bot.send_message(server.get_channel(location[0]), bot_prefix + '%s in server: ``%s`` Context: ```Channel: %s\n\n%s```' % (logged_msg, str(message.server), str(message.channel), i))
                             else:
-                                if notify['type'] == 'msg':
+                                if bot.notify['type'] == 'msg':
                                     await webhook('```%s```' % i, 'message', is_separate)
-                                elif notify['type'] == 'ping':
+                                elif bot.notify['type'] == 'ping':
                                     await webhook('```%s```' % i, 'message ping', is_separate)
                                 else:
                                     await bot.send_message(server.get_channel(location[0]), '```%s```' % i)
@@ -540,4 +562,4 @@ if __name__ == '__main__':
                 print('Failed to load extension {}\n{}: {}'.format(extension, type(e).__name__, e))
 
     bot.loop.create_task(game_and_avatar(bot))
-    bot.run(os.environ['TOKEN'], bot=False)
+    bot.run(config['token'], bot=False)

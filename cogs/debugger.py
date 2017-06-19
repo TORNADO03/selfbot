@@ -8,6 +8,7 @@ import glob
 import math
 from PythonGists import PythonGists
 from discord.ext import commands
+from appuselfbot import bot_prefix
 from io import StringIO
 from cogs.utils.checks import *
 
@@ -265,7 +266,6 @@ class Debugger:
         else:
             await self.bot.send_message(ctx.message.channel, appuselfbot.bot_prefix + 'Unloaded module: `{}`'.format(msg))
         await self.bot.delete_message(ctx.message)
-
-
+    
 def setup(bot):
     bot.add_cog(Debugger(bot))
