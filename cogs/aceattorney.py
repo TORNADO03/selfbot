@@ -82,18 +82,6 @@ class AceAttorney:
         """EUREKA!"""
         await self.bot.delete_message(ctx.message)
         await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/O8gVn3q.png"))
-	
-    @commands.command(pass_context=True)
-    async def overruled(self, ctx):
-        """OVERRULED!"""
-        await self.bot.delete_message(ctx.message)
-        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/LWA0zBP.png"))
-	
-    @commands.command(pass_context=True)
-    async def objectright(self, ctx):
-        """ObjectRight"""
-        await self.bot.delete_message(ctx.message)
-        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/V5drICD.png"))
 
 def setup(bot):
     bot.add_cog(AceAttorney(bot))

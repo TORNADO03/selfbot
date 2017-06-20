@@ -88,6 +88,9 @@ class Todo:
                 sorted_items = sorted(self.todo_list.items(), key=lambda x: x[1][0] if type(x[1][0]) is float else 0)
                 sorted_keys = [item[0] for item in sorted_items]
 
+                description = ''
+                all_entries = []
+
                 for entry in sorted_keys:
 
                     if self.todo_list[entry][0] == "none":
@@ -98,7 +101,7 @@ class Todo:
                         m, s = divmod(self.todo_list[entry][0]-current_time(), 60)
                         h, m = divmod(m, 60)
                         d, h = divmod(h, 24)
-                        embed.description += "\u2022 {} - remaining time {}\n".format(entry, "%02d:%02d:%02d:%02d" % (int(d), int(h), int(m), int(s)))
+                        embed.description += "\u2022 {} - time left: {}\n".format(entry, "%02d:%02d:%02d:%02d" % (int(d), int(h), int(m), int(s)))
                         if entry[1] != 0:
                             if self.todo_list[entry][2] != 0:
                                 channel = self.bot.get_channel(self.todo_list[entry][2])
@@ -117,8 +120,18 @@ class Todo:
                                 embed.description += '    - Repeat: %s' % repeat
 
                         else:
-                            embed.description += "\u2022 {} - remaining time {}\n".format(entry, "%02d:%02d:%02d:%02d" % (int(d), int(h), int(m), int(s)))
-                await self.bot.send_message(ctx.message.channel, "", embed=embed)
+                            embed.description += "\u2022 {} - time left: {}\n".format(entry, "%02d:%02d:%02d:%02d" % (int(d), int(h), int(m), int(s)))
+
+                    if len(embed.description + description) > 2000:
+                        all_entries.append(embed)
+                        embed = discord.Embed(title="{}'s to-do list:".format(ctx.message.author.name), description="")
+                        embed.description = description
+
+                all_entries.append(embed)
+                for count, embed in enumerate(all_entries):
+                    if len(all_entries) > 1:
+                        embed.title = "{}'s to-do list ({}/{}):".format(ctx.message.author.name.format(), count+1, len(all_entries))
+                    await self.bot.send_message(ctx.message.channel, "", embed=embed)
             
     @todo.command(pass_context=True)
     async def add(self, ctx, *, msg):
