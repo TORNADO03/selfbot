@@ -90,6 +90,36 @@ class AceAttorney:
         await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/LWA0zBP.png"))
 	
     @commands.command(pass_context=True)
+    async def hangon(self, ctx):
+        """HANG ON!"""
+        await self.bot.delete_message(ctx.message)
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/ROuT68M.png"))
+	
+    @commands.command(pass_context=True)
+    async def havealook(self, ctx):
+        """HAVE A LOOK!"""
+        await self.bot.delete_message(ctx.message)
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/heFKpaV.png"))
+	
+    @commands.command(pass_context=True)
+    async def satorha(self, ctx):
+        """SATORHA!"""
+        await self.bot.delete_message(ctx.message)
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/l81174m.png"))
+	
+    @commands.command(pass_context=True)
+    async def insolence(self, ctx):
+        """SUCH INSOLENCE!"""
+        await self.bot.delete_message(ctx.message)
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/d9Pdd9D.png"))
+	
+    @commands.command(pass_context=True)
+    async def welcome(self, ctx):
+        """WELCOME!"""
+        await self.bot.delete_message(ctx.message)
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/sLmPuWl.png"))
+	
+    @commands.command(pass_context=True)
     async def objectright(self, ctx):
         """ObjectRight"""
         await self.bot.delete_message(ctx.message)
