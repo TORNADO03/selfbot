@@ -51,7 +51,7 @@ class AceAttorney:
     async def silence(self, ctx):
         """SHUT THE FUCK UP!"""
         await self.bot.delete_message(ctx.message)
-        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/AxbuzZ9.png"))
+        await self.bot.send_message(ctx.message.channel, content=None, embed=discord.Embed(color=discord.Color.blue()).set_image(url="http://i.imgur.com/nOZoypt.png"))
         
     @commands.command(pass_context=True)
     async def gotcha(self, ctx):
