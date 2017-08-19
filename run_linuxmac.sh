@@ -11,7 +11,6 @@ updater () {
 		git fetch origin master
 		if [ -d "settings" ]; then
 			cp -r settings tmp
-			mv settings settings2
 		fi
 		new=$(git remote show origin)
 		if [[ "${new}" =~ "up" ]] || [[ "${new}" =~ "fast-forwardable" ]] ; then
@@ -39,11 +38,6 @@ updater () {
 			fi
 		fi
 		sleep 1
-		if [ -d "settings2" ]; then
-				rm -d -r settings >/dev/null 2>&1
-				mv settings2 settings
-
-		fi
 	else
 		echo "You do not have git installed. Auto-update is not currently supported" # TODO HTTP update
 		echo "Git is almost certainly available from your package manager. Install with:"
@@ -55,7 +49,6 @@ min_updater() {
 	if hash git 2>/dev/null; then
 		if [ -d "settings" ]; then
 			cp -r settings tmp
-			mv settings settings2
 		fi
 		git fetch origin master
 		echo ""
@@ -72,11 +65,6 @@ min_updater() {
 			sleep 2
 		fi
 		sleep 1
-		if [ -d "settings2" ]; then
-				rm -d -r settings >/dev/null 2>&1
-				mv settings2 settings
-
-		fi
 	else
 		echo "You do not have git installed. Auto-update is not currently supported" # TODO HTTP update
 		echo "Git is almost certainly available from your package manager. Install with:"
@@ -106,9 +94,9 @@ run_bot() {
 		else
 			echo "Using pip as a python3 module"
 			echo "Upgrading pip"
-			if python3 -m pip install --upgrade pip; then
+			if python3 -m pip install --user --upgrade pip; then
 				echo "Upgrading requirements"
-				if python3 -m pip install -r requirements.txt >/dev/null; then
+				if python3 -m pip install --user -r requirements.txt >/dev/null; then
 					echo "Starting bot..."
 					python3 loopself.py
 					ret=$?
@@ -159,9 +147,9 @@ run_bot() {
 		else
 			echo "Using pip as a python3 module"
 			echo "Upgrading pip"
-			if python -m pip install --upgrade pip; then
+			if python -m pip install --user --upgrade pip; then
 				echo "Upgrading requirements"
-				if python -m pip install -r requirements.txt >/dev/null; then
+				if python -m pip install --user -r requirements.txt >/dev/null; then
 					echo "Starting bot..."
 					python loopself.py
 					ret=$?
