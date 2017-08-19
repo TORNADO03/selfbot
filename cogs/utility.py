@@ -4,13 +4,21 @@ import strawpy
 import pytz
 import re
 import requests
+import json
+import discord
+import os
+import glob
+from PIL import Image
 from PythonGists import PythonGists
-from appuselfbot import bot_prefix
 from discord.ext import commands
 from cogs.utils.checks import *
 from bs4 import BeautifulSoup
 from urllib import parse
 from urllib.request import Request, urlopen
+import math
+from math import sqrt
+from cogs.utils.dataIO import dataIO
+from cogs.utils.config import write_config_value
 
 '''Module for fun/meme commands commands'''
 
@@ -19,46 +27,54 @@ class Utility:
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.group(aliases=['date'], pass_context=True)
-    async def time(self, ctx):
-        """Date time module."""
-        def_time = False
-        tz = ""
-        with open('settings/optional_config.json', 'r+') as fp:
-            opt = json.load(fp)
+    @staticmethod
+    def get_datetime():
+        a = None
+        tzerror = False
+        opt = dataIO.load_json('settings/optional_config.json')
+        try:
             if opt['timezone']:
-                if opt['timezone'] != "":
-                    tz = opt['timezone']
-                    def_time = True
-            else:
-                opt['timezone'] = ""
-        if def_time:
-            a = pytz.timezone(tz)
-            dandt = str(datetime.datetime.now(a)).split("+")[0]
-        else:
-            dandt = str(datetime.datetime.now())
-        listdandt = dandt.split(" ")
-        date = listdandt[0].split("-")
-        year = date[0]
-        month = date[1]
-        day = date[2]
-        time = listdandt[1].split(":")
-        hour = time[0]
-        minute = time[1]
-        second = time[2].split(".")[0]  # remove the milliseconds
+                tz = opt['timezone']
+                a = pytz.timezone(tz)
+        except IndexError:
+            # Timezone entry missing in configuration file
+            pass
+        except pytz.exceptions.UnknownTimeZoneError:
+            tzerror = True
+        return datetime.datetime.now(a), tzerror
 
+    @commands.command(pass_context=True)
+    async def now(self, ctx):
+        """Date time module."""
+        dandt, tzerror = self.get_datetime()
         if embed_perms(ctx.message):
-            em = discord.Embed(title='Date and Time', color=discord.Color.blue())
-            em.add_field(name='Local Time', value=hour + " hrs " + minute + " mins " + second + " secs", inline=False)
-            em.add_field(name='Day', value=day)
-            em.add_field(name='Month', value=month)
-            em.add_field(name='Year', value=year)
+            em = discord.Embed(color=discord.Color.blue())
+            em.add_field(name=u'\u23F0 Time', value="{:%H:%M:%S}".format(dandt), inline=False)
+            em.add_field(name=u'\U0001F4C5 Date', value="{:%d %B %Y}".format(dandt), inline=False)
+            if tzerror:
+                em.add_field(name=u'\u26A0 Warning', value="Invalid timezone specified, system timezone was used instead.", inline=False)
 
-            await self.bot.send_message(ctx.message.channel, content=None, embed=em)
+            await ctx.send(content=None, embed=em)
         else:
-            msg = '**Local Date and Time:** ```Time: %s\nDate: %s```' % (listdandt[1].split(".")[0], listdandt[0])
-            await self.bot.send_message(ctx.message.channel, bot_prefix + msg)
-        await self.bot.delete_message(ctx.message)
+            msg = '**Local Date and Time:** ```{:Time: %H:%M:%S\nDate: %Y-%m-%d```}'.format(dandt)
+            await ctx.send(self.bot.bot_prefix + msg)
+        await ctx.message.delete()
+
+    @commands.command(pass_context=True)
+    async def time(self, ctx):
+        """Show current time"""
+        await ctx.message.delete()
+        dandt, tzerror = self.get_datetime()
+        msg = '{:Time: `%H:%M:%S`}'.format(dandt)
+        await ctx.send(self.bot.bot_prefix + msg)
+
+    @commands.command(pass_context=True)
+    async def date(self, ctx):
+        """Show current date"""
+        await ctx.message.delete()
+        dandt, tzerror = self.get_datetime()
+        msg = '{:Date: `%d %B %Y`}'.format(dandt)
+        await ctx.send(self.bot.bot_prefix + msg)
 
     @commands.command(pass_context=True, aliases=['emote'])
     async def emoji(self, ctx, *, msg):
@@ -67,23 +83,25 @@ class Utility:
         Usage:
         1) >emoji :smug: [Will display the smug emoji as an image]
         2) >emoji copy :smug: [Will add the emoji as a custom emote for the server]
+        3) >emoji s :smug: [Will display the smug emoji as an image with additional info]
         """
-        copy_emote_bool = False
-        if "copy " in msg:
+        if msg.startswith("copy "):
             msg = msg.split("copy ")[1]
             copy_emote_bool = True
+        else:
+            copy_emote_bool = False
         if msg.startswith('s '):
             msg = msg[2:]
-            get_server = True
+            get_guild = True
         else:
-            get_server = False
+            get_guild = False
         msg = msg.strip(':')
         if msg.startswith('<'):
             msg = msg[2:].split(':', 1)[0].strip()
-        url = emoji = server = None
+        url = emoji = guild = None
         exact_match = False
-        for server in self.bot.servers:
-            for emoji in server.emojis:
+        for guild in self.bot.guilds:
+            for emoji in guild.emojis:
                 if msg.strip().lower() in str(emoji):
                     url = emoji.url
                     emote_name = emoji.name
@@ -105,191 +123,173 @@ class Utility:
                 img.write(block)
 
         if attach_perms(ctx.message) and url:
-            if get_server:
-                await self.bot.send_message(ctx.message.channel,
-                                            '**ID:** {}\n**Server:** {}'.format(emoji.id, server.name))
+            if get_guild:
+                await ctx.send('**ID:** {}\n**Server:** {}'.format(str(emoji.id), guild.name))
             with open(name, 'rb') as fp:
                 if copy_emote_bool:
                     e = fp.read()
                 else:
-                    await self.bot.send_file(ctx.message.channel, fp)
+                    await ctx.send(file=discord.File(fp))
             if copy_emote_bool:
                 try:
+                    await ctx.message.guild.create_custom_emoji(name=emote_name, image=e)
                     embed = discord.Embed(title="Added new emote", color=discord.Color.blue())
                     embed.description = "New emote added: " + emote_name
-                    await self.bot.say("", embed=embed)
-                    await self.bot.create_custom_emoji(ctx.message.server, name=emote_name, image=e)
-                except:
-                    await self.bot.say("Not enough permissions to do this")
+                    await ctx.send("", embed=embed)
+                except discord.Forbidden:
+                    ctx.send(self.bot.bot_prefix + "Not enough permissions to add emoji!")
             os.remove(name)
         elif not embed_perms(ctx.message) and url:
-            await self.bot.send_message(ctx.message.channel, url)
+            await ctx.send(url)
         else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Could not find emoji.')
+            await ctx.send(self.bot.bot_prefix + 'Could not find emoji.')
 
-        return await self.bot.delete_message(ctx.message)
+        return await ctx.message.delete()
 
     @commands.command(pass_context=True)
     async def code(self, ctx, *, msg):
-        """Write text in code format"""
-        await self.bot.delete_message(ctx.message)
-        await self.bot.send_message(ctx.message.channel, "```" + msg + "```")
+        """Write text in code format."""
+        await ctx.message.delete()
+        await ctx.send("```" + msg.replace("`", "") + "```")
 
     @commands.command(pass_context=True)
     async def timezone(self, ctx, *, msg):
-        """Set preferred timezone. Use `>timezonelist` for full list of timezones"""
-        if msg:
-            with open('settings/optional_config.json', 'r+') as fp:
-                opt = json.load(fp)
-                opt['timezone'] = msg
-                fp.seek(0)
-                fp.truncate()
-                json.dump(opt, fp, indent=4)
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Preffered timezone has been set')
-        else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'You can find the list of timezones at `https://gist.github.com/anonymous/67129932414d0b82f58758a699a5a0ef`')
+        """Set preferred timezone. Use the timezonelist for a full list of timezones."""
+        write_config_value("optional_config", "timezone", msg)
+        await ctx.send(self.bot.bot_prefix + 'Preferred timezone has been set.')
 
     @commands.command(pass_context=True)
     async def timezonelist(self, ctx):
-        """List of all available timezones"""
-        await self.bot.delete_message(ctx.message)
-        embed = discord.Embed(title="Timezone List")
-        embed.set_author(name="Github Link", url = "https://gist.github.com/anonymous/67129932414d0b82f58758a699a5a0ef")
-        await self.bot.send_message(ctx.message.channel, "", embed=embed)
+        """List all available timezones for the timezone command."""
+        await ctx.message.delete()
+        embed = discord.Embed()
+        embed.description = "[List of valid timezones](https://gist.github.com/anonymous/67129932414d0b82f58758a699a5a0ef)"
+        await ctx.send("", embed=embed)
 
     @commands.command(pass_context=True)
     async def cmdprefix(self, ctx, *, msg: str = None):
-        """Set command prefix, needs a reboot to activate"""
-        if msg:
-            with open('settings/config.json', 'r+') as fp:
-                opt = json.load(fp)
-                opt['cmd_prefix'] = msg
-                fp.seek(0)
-                fp.truncate()
-                json.dump(opt, fp, indent=4)
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Prefix changed. use `restart` to reboot the bot for the updated prefix')
-        else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Type a prefix as an argument for the `prefix` command')
+        """Set your command prefix for normal commands. Requires a reboot."""
+        write_config_value("config", "cmd_prefix", msg)
+        await ctx.send(self.bot.bot_prefix + 'Prefix changed. Use `restart` to reboot the bot for the updated prefix.')
 
     @commands.command(pass_context=True)
-    async def customcmdprefix(self, ctx, *, msg: str = None):
-        """Set command prefix, needs a reboot to activate"""
-        if msg:
-            with open('settings/config.json', 'r+') as fp:
-                opt = json.load(fp)
-                opt['customcmd_prefix'] = msg
-                fp.seek(0)
-                fp.truncate()
-                json.dump(opt, fp, indent=4)
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Prefix changed. use `restart` to reboot the bot for the updated prefix')
-        else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Type a prefix as an argument for the `prefix` command')
+    async def customcmdprefix(self, ctx, *, msg):
+        """Set your command prefix for custom commands."""
+        write_config_value("config", "customcmd_prefix", msg)
+        self.bot.customcmd_prefix = msg
+        await ctx.send(self.bot.bot_prefix + 'Prefix changed.')
 
     @commands.command(pass_context=True)
-    async def botprefix(self, ctx, *, msg: str = None):
-        """Set bot prefix, needs a reboot to activate"""
-        if msg:
-            with open('settings/config.json', 'r+') as fp:
-                opt = json.load(fp)
-                opt['bot_identifier'] = msg
-                fp.seek(0)
-                fp.truncate()
-
-                json.dump(opt, fp, indent=4)
-            new_bot_prefix = msg
-            await self.bot.send_message(ctx.message.channel, new_bot_prefix + 'Prefix changed. use `restart` to reboot the bot for the updated prefix')
-        else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Type a prefix as an argument for the `prefix` command')
+    async def botprefix(self, ctx, *, msg):
+        """Set bot prefix"""
+        write_config_value("config", "bot_identifier", msg)
+        self.bot.bot_prefix = msg + ' '
+        await ctx.send(self.bot.bot_prefix + 'Prefix changed.')
 
     @commands.command(pass_context=True)
     async def calc(self, ctx, *, msg):
         """Simple calculator. Ex: >calc 2+2"""
-        equation = msg.strip().replace('^', '**')
-        if '=' in equation:
-            left = eval(equation.split('=')[0])
-            right = eval(equation.split('=')[1])
-            answer = str(left == right)
-        else:
-            answer = str(eval(equation))
+        equation = msg.strip().replace('^', '**').replace('x', '*')
+        try:
+            if '=' in equation:
+                left = eval(equation.split('=')[0], {"__builtins__": None}, {"sqrt": sqrt})
+                right = eval(equation.split('=')[1], {"__builtins__": None}, {"sqrt": sqrt})
+                answer = str(left == right)
+            else:
+                answer = str(eval(equation, {"__builtins__": None}, {"sqrt": sqrt}))
+        except TypeError:
+            return await ctx.send(self.bot.bot_prefix + "Invalid calculation query.")
         if embed_perms(ctx.message):
             em = discord.Embed(color=0xD3D3D3, title='Calculator')
-            em.add_field(name='Input:', value=msg.replace('**', '^'), inline=False)
+            em.add_field(name='Input:', value=msg.replace('**', '^').replace('x', '*'), inline=False)
             em.add_field(name='Output:', value=answer, inline=False)
-            await self.bot.send_message(ctx.message.channel, content=None, embed=em)
-            await self.bot.delete_message(ctx.message)
+            await ctx.send(content=None, embed=em)
+            await ctx.message.delete()
         else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + answer)
+            await ctx.send(self.bot.bot_prefix + answer)
 
-    @commands.command(pass_context=True)
-    async def d(self, ctx, *, txt: str = None):
-        """Deletes the last message sent or n messages sent. Ex: >d 5"""
 
-        # If number of seconds/messages are specified
-        if txt:
-            if txt[0] == '!':
-                killmsg = self.bot.self_log[ctx.message.channel.id][len(self.bot.self_log[ctx.message.channel.id]) - 2]
-                timer = int(txt[1:].strip())
-
-                # Animated countdown because screw rate limit amirite
-                destroy = await self.bot.edit_message(ctx.message,
-                                                      bot_prefix + 'The above message will self-destruct in:')
-                msg = await self.bot.send_message(ctx.message.channel, '``%s  |``' % timer)
-                for i in range(0, timer, 4):
-                    if timer - 1 - i == 0:
-                        await self.bot.delete_message(destroy)
-                        msg = await self.bot.edit_message(msg, '``0``')
-                        break
-                    else:
-                        msg = await self.bot.edit_message(msg, '``%s  |``' % int(timer - 1 - i))
-                        await asyncio.sleep(1)
-                    if timer - 1 - i != 0:
-                        if timer - 2 - i == 0:
-                            await self.bot.delete_message(destroy)
-                            msg = await self.bot.edit_message(msg, '``0``')
-                            break
-                        else:
-                            msg = await self.bot.edit_message(msg, '``%s  /``' % int(timer - 2 - i))
-                            await asyncio.sleep(1)
-                    if timer - 2 - i != 0:
-                        if timer - 3 - i == 0:
-                            await self.bot.delete_message(destroy)
-                            msg = await self.bot.edit_message(msg, '``0``')
-                            break
-                        else:
-                            msg = await self.bot.edit_message(msg, '``%s  -``' % int(timer - 3 - i))
-                            await asyncio.sleep(1)
-                    if timer - 3 - i != 0:
-                        if timer - 4 - i == 0:
-                            await self.bot.delete_message(destroy)
-                            msg = await self.bot.edit_message(msg, '``0``')
-                            break
-                        else:
-                            msg = await self.bot.edit_message(msg, '``%s  \ ``' % int(timer - 4 - i))
-                            await asyncio.sleep(1)
-                await self.bot.edit_message(msg, ':bomb:')
-                await asyncio.sleep(.5)
-                await self.bot.edit_message(msg, ':fire:')
-                await self.bot.edit_message(killmsg, ':fire:')
-                await asyncio.sleep(.5)
-                await self.bot.delete_message(msg)
-                await self.bot.delete_message(killmsg)
+    @commands.command(aliases=['sd'],pass_context=True)
+    async def selfdestruct(self, ctx, *, amount: str = None):
+        """Builds a self-destructing message. Ex: >sd 5"""
+        killmsg = await ctx.message.channel.history().flatten()
+        killmsg = killmsg[1]
+        timer = int(amount.strip())
+        # Animated countdown because screw rate limit amirite
+        destroy = ctx.message
+        await ctx.message.edit(content=self.bot.bot_prefix + 'The above message will self-destruct in:')
+        msg = await ctx.send('``%s  |``' % timer)
+        for i in range(0, timer, 4):
+            if timer - 1 - i == 0:
+                await destroy.delete()
+                await msg.edit(content='``0``')
+                break
             else:
-                await self.bot.delete_message(ctx.message)
-                deleted = 0
-                async for sent_message in self.bot.logs_from(ctx.message.channel, limit=200):
-                    if sent_message.author == ctx.message.author:
-                        try:
-                            await self.bot.delete_message(sent_message)
-                            deleted += 1
-                        except:
-                            pass
-                        if deleted == int(txt):
-                            break
+                await msg.edit(content='``%s  |``' % int(timer - 1 - i))
+                await asyncio.sleep(1)
+            if timer - 1 - i != 0:
+                if timer - 2 - i == 0:
+                    await destroy.delete()
+                    await msg.edit(content='``0``')
+                    break
+                else:
+                    await msg.edit(content='``%s  /``' % int(timer - 2 - i))
+                    await asyncio.sleep(1)
+            if timer - 2 - i != 0:
+                if timer - 3 - i == 0:
+                    await destroy.delete()
+                    await msg.edit(content='``0``')
+                    break
+                else:
+                    await msg.edit(content='``%s  -``' % int(timer - 3 - i))
+                    await asyncio.sleep(1)
+            if timer - 3 - i != 0:
+                if timer - 4 - i == 0:
+                    await destroy.delete()
+                    await msg.edit(content='``0``')
+                    break
+                else:
+                    await msg.edit(content='``%s  \ ``' % int(timer - 4 - i))
+                    await asyncio.sleep(1)
+        await msg.edit(content=':bomb:')
+        await asyncio.sleep(.5)
+        await msg.edit(content=':fire:')
+        await killmsg.edit(content=':fire:')
+        await asyncio.sleep(.5)
+        await msg.delete()
+        await killmsg.delete()
 
-        # If no number specified, delete message immediately
-        else:
-            await self.bot.delete_message(self.bot.self_log[ctx.message.channel.id].pop())
-            await self.bot.delete_message(self.bot.self_log[ctx.message.channel.id].pop())
+    @commands.command(aliases=['d'], pass_context=True)
+    async def delete(self, ctx, txt=None, channel=None):
+        """Deletes the last message sent or n messages sent. Ex: >d 5"""
+        if txt: # If number of seconds/messages are specified
+            await ctx.message.delete()
+            deleted = 0
+            if txt == "all":
+                limit = 1000
+            else:
+                txt = int(txt)
+                limit = 200
+                if txt > 200: 
+                    txt = 200
+            if channel:
+                channel = find_channel(ctx.message.guild.channels, channel)
+                if not channel: 
+                    channel = find_channel(self.bot.get_all_channels(), channel)
+            else: 
+                channel = ctx.message.channel
+            async for sent_message in channel.history():
+                if sent_message.author == ctx.message.author:
+                    try:
+                        await sent_message.delete()
+                        deleted += 1
+                    except: 
+                        pass
+                    if deleted == txt: 
+                        break
+        else: # If no number specified, delete last message immediately
+            await self.bot.self_log[str(ctx.message.channel.id)].pop().delete()
+            await self.bot.self_log[str(ctx.message.channel.id)].pop().delete()
 
     @commands.command(pass_context=True)
     async def spoiler(self, ctx, *, msg: str):
@@ -298,14 +298,15 @@ class Utility:
             if " | " in msg:
                 spoiled_work, spoiler = msg.lower().split(" | ", 1)
             else:
-                spoiled_work, _, spoiler = msg.lower().partition(" ")
-            await self.bot.edit_message(ctx.message, bot_prefix + 'Spoiler for `' + spoiled_work + '`: \n`'
+                spoiled_work = msg
+                spoiler = msg
+            await ctx.message.edit(content=self.bot.bot_prefix + 'Spoiler for `' + spoiled_work + '`: \n`'
                                         + ''.join(
                 map(lambda c: chr(ord('a') + (((ord(c) - ord('a')) + 13) % 26)) if c >= 'a' and c <= 'z' else c,
                     spoiler))
-                                        + '`\n' + bot_prefix + 'Use http://rot13.com to decode')
+                                        + '`\n' + self.bot.bot_prefix + 'Use http://rot13.com to decode')
         except:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Could not encrypt spoiler.')
+            await ctx.send(self.bot.bot_prefix + 'Could not encrypt spoiler.')
 
     @commands.group(pass_context=True)
     async def gist(self, ctx):
@@ -313,10 +314,10 @@ class Utility:
         if ctx.invoked_subcommand is None:
             pre = cmd_prefix_len()
             url = PythonGists.Gist(
-                description='Created in channel: {} in server: {}'.format(ctx.message.channel, ctx.message.server),
+                description='Created in channel: {} in server: {}'.format(ctx.message.channel, ctx.message.guild),
                 content=ctx.message.content[4 + pre:].strip(), name='Output')
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Gist output: ' + url)
-            await self.bot.delete_message(ctx.message)
+            await ctx.send(self.bot.bot_prefix + 'Gist output: ' + url)
+            await ctx.message.delete()
 
     @gist.command(pass_context=True)
     async def file(self, ctx, *, msg):
@@ -325,18 +326,18 @@ class Utility:
             with open(msg) as fp:
                 output = fp.read()
                 url = PythonGists.Gist(
-                    description='Created in channel: {} in server: {}'.format(ctx.message.channel, ctx.message.server),
+                    description='Created in channel: {} in server: {}'.format(ctx.message.channel, ctx.message.guild),
                     content=output, name=msg.replace('/', '.'))
-                await self.bot.send_message(ctx.message.channel, bot_prefix + 'Gist output: ' + url)
+                await ctx.send(self.bot.bot_prefix + 'Gist output: ' + url)
         except:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'File not found.')
+            await ctx.send(self.bot.bot_prefix + 'File not found.')
         finally:
-            await self.bot.delete_message(ctx.message)
+            await ctx.message.delete()
 
     @commands.command(pass_context=True)
     async def uni(self, ctx, *, msg: str):
-        """Convert to unicode emoji if possilbe. Ex: >uni :eyes:"""
-        await self.bot.send_message(ctx.message.channel, "`" + msg.replace("`", "") + "`")
+        """Convert to unicode emoji if possible. Ex: >uni :eyes:"""
+        await ctx.send("`" + msg.replace("`", "") + "`")
 
     @commands.command(pass_context=True)
     async def poll(self, ctx, *, msg):
@@ -350,19 +351,17 @@ class Utility:
             else:
                 title = 'Poll by %s' % ctx.message.author.name
         except:
-            return await self.bot.send_message(ctx.message.channel,
-                                               bot_prefix + 'Invalid Syntax. Example use: ``>poll Favorite color = Blue | Red | Green | Purple``')
+            return ctx.send(self.bot.bot_prefix + 'Invalid Syntax. Example use: ``>poll Favorite color = Blue | Red | Green | Purple``')
 
         poll = await loop.run_in_executor(None, strawpy.create_poll, title.strip(), options)
-        await self.bot.send_message(ctx.message.channel, bot_prefix + poll.url)
+        await ctx.send(self.bot.bot_prefix + poll.url)
 
     @commands.command(pass_context=True, aliases=['source'])
     async def sauce(self, ctx, *, txt: str = None):
         """Find source of image. Ex: >sauce http://i.imgur.com/NIq2U67.png"""
         if not txt:
-            return await self.bot.send_message(ctx.message.channel,
-                                               bot_prefix + 'Input a link to check the source. Ex: ``>sauce http://i.imgur.com/NIq2U67.png``')
-        await self.bot.delete_message(ctx.message)
+            return await ctx.send(self.bot.bot_prefix + 'Input a link to check the source. Ex: ``>sauce http://i.imgur.com/NIq2U67.png``')
+        await ctx.message.delete()
         sauce_nao = 'http://saucenao.com/search.php?db=999&url='
         request_headers = {
             "Accept-Language": "en-US,en;q=0.5",
@@ -376,8 +375,7 @@ class Utility:
             req = Request(sauce_nao + txt, headers=request_headers)
             webpage = await loop.run_in_executor(None, urlopen, req)
         except:
-            return await self.bot.send_message(ctx.message.channel,
-                                               bot_prefix + 'Exceeded daily request limit. Try again tomorrow, sorry!')
+            return await ctx.send(self.bot.bot_prefix + 'Exceeded daily request limit. Try again tomorrow, sorry!')
         soup = BeautifulSoup(webpage, 'html.parser')
         pretty_soup = soup.prettify()
         em = discord.Embed(color=0xaa550f, description='**Input:**\n{}\n\n**Results:**'.format(txt))
@@ -480,17 +478,15 @@ class Utility:
                 similarity_percent[0][:-1]) < 60.0:
             em = discord.Embed(color=0xaa550f, description='**Input:**\n{}\n\n**No results found.**'.format(txt))
 
-        await self.bot.send_message(ctx.message.channel, content=None, embed=em)
+        await ctx.send(content=None, embed=em)
 
+    @commands.has_permissions(change_nickname=True)
     @commands.command(aliases=['nick'], pass_context=True, no_pm=True)
-    async def nickname(self, ctx, *, txt: str = None):
+    async def nickname(self, ctx, *, txt=None):
         """Change your nickname on a server. Leave empty to remove nick."""
-        await self.bot.delete_message(ctx.message)
-        try:
-            await self.bot.change_nickname(ctx.message.author, txt)
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Changed nickname to: `%s`' % txt)
-        except:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + 'Unable to change nickname.')
+        await ctx.message.delete()
+        await ctx.message.author.edit(nick=txt)
+        await ctx.send(self.bot.bot_prefix + 'Changed nickname to: `%s`' % txt)
 
     @commands.command(pass_context=True)
     async def ud(self, ctx, *, msg):
@@ -499,7 +495,7 @@ class Utility:
         You can pick a specific result to use with >ud <term> | <result>.
         If no result is specified, the first result will be used.
         """
-        await self.bot.delete_message(ctx.message)
+        await ctx.message.delete()
         number = 1
         if " | " in msg:
             msg, number = msg.rsplit(" | ", 1)
@@ -507,14 +503,14 @@ class Utility:
         response = requests.get("http://api.urbandictionary.com/v0/define?term={}".format(search)).text
         result = json.loads(response)
         if result["result_type"] == "no_results":
-            await self.bot.send_message(ctx.message.channel,
-                                        bot_prefix + "{} couldn't be found on Urban Dictionary.".format(msg))
+            await ctx.send(self.bot.bot_prefix + "{} couldn't be found on Urban Dictionary.".format(msg))
         else:
             try:
                 top_result = result["list"][int(number) - 1]
                 embed = discord.Embed(title=top_result["word"], description=top_result["definition"],
                                       url=top_result["permalink"])
-                embed.add_field(name="Example:", value=top_result["example"])
+                if top_result["example"]:
+                    embed.add_field(name="Example:", value=top_result["example"])
                 if result["tags"]:
                     embed.add_field(name="Tags:", value=" ".join(result["tags"]))
                 embed.set_author(name=top_result["author"],
@@ -522,78 +518,312 @@ class Utility:
                 number = str(int(number) + 1)
                 embed.set_footer(text="{} results were found. To see a different result, use >ud {} | {}.".format(
                     len(result["list"]), msg, number))
-                await self.bot.send_message(ctx.message.channel, "", embed=embed)
+                await ctx.send("", embed=embed)
             except IndexError:
-                await self.bot.send_message(ctx.message.channel,
-                                            bot_prefix + "That result doesn't exist! Try >ud {}.".format(msg))
+                await ctx.send(self.bot.bot_prefix + "That result doesn't exist! Try >ud {}.".format(msg))
 
-    @commands.command(pass_context=True)
+    @commands.command(pass_context=True, aliases=['yt', 'vid', 'video'])
     async def youtube(self, ctx, *, msg):
         """Search for videos on YouTube."""
         search = parse.quote(msg)
         response = requests.get("https://www.youtube.com/results?search_query={}".format(search)).text
-        result = BeautifulSoup(response, "lxml")
-        await self.bot.delete_message(ctx.message)
-        await self.bot.send_message(ctx.message.channel, "https://www.youtube.com{}".format(result.find_all(attrs={'class': 'yt-uix-tile-link'})[0].get('href')))
+        result = BeautifulSoup(response, "html.parser")
+        await ctx.message.delete()
+        await ctx.send("https://www.youtube.com{}".format(result.find_all(attrs={'class': 'yt-uix-tile-link'})[0].get('href')))
 
     @commands.command(pass_context=True)
-    async def xkcd(self, ctx, *, comic="latest"):
+    async def xkcd(self, ctx, *, comic=""):
         """Pull comics from xkcd."""
-        if comic == "latest":
-            site = requests.get("https://xkcd.com/info.0.json")
-        else:
-            site = requests.get("https://xkcd.com/{}/info.0.json".format(comic))
+        if comic == "random":
+            randcomic = requests.get("https://c.xkcd.com/random/comic/".format(comic))
+            comic = randcomic.url.split("/")[-2]
+        site = requests.get("https://xkcd.com/{}/info.0.json".format(comic))
         if site.status_code == 404:
             site = None
             found = None
             search = parse.quote(comic)
             result = requests.get("https://www.google.co.nz/search?&q={}+site:xkcd.com".format(search)).text
-            soup = BeautifulSoup(result, "lxml")
+            soup = BeautifulSoup(result, "html.parser")
             links = soup.find_all("cite")
             for link in links:
                 if link.text.startswith("https://xkcd.com/"):
                     found = link.text.split("/")[3]
                     break
             if not found:
-                await self.bot.send_message(ctx.message.channel, bot_prefix + "That comic doesn't exist!")
+                await ctx.send(self.bot.bot_prefix + "That comic doesn't exist!")
             else:
                 site = requests.get("https://xkcd.com/{}/info.0.json".format(found))
                 comic = found
         if site:
             json = site.json()
-            embed = discord.Embed(title="xkcd {}: {}".format(json["num"], json["title"]), url="https://xkcd.com/{}/".format(comic))
+            embed = discord.Embed(title="xkcd {}: {}".format(json["num"], json["title"]), url="https://xkcd.com/{}".format(comic))
             embed.set_image(url=json["img"])
             embed.set_footer(text="{}".format(json["alt"]))
-            await self.bot.send_message(ctx.message.channel, "", embed=embed)
+            await ctx.send("", embed=embed)
 
     @commands.command(pass_context=True)
     async def hastebin(self, ctx, *, data):
         """Post to Hastebin."""
-        await self.bot.delete_message(ctx.message)
+        await ctx.message.delete()
         post = requests.post("https://hastebin.com/documents", data=data)
         try:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + "Succesfully posted to Hastebin:\nhttps://hastebin.com/{}.txt".format(post.json()["key"]))
+            await ctx.send(self.bot.bot_prefix + "Succesfully posted to Hastebin:\nhttps://hastebin.com/{}.txt".format(post.json()["key"]))
         except json.JSONDecodeError:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + "Failed to post to Hastebin. The API may be down right now.")
+            await ctx.send(self.bot.bot_prefix + "Failed to post to Hastebin. The API may be down right now.")
 
     @commands.command(pass_context=True)
     async def whoisplaying(self, ctx, *, game):
         """Check how many people are playing a certain game."""
         msg = ""
-        for server in self.bot.servers:
-            for user in server.members:
+        for guild in self.bot.guilds:
+            for user in guild.members:
                 if user.game is not None:
-                    if user.game.name.lower() == game.lower():
-                        msg += "{}#{}\n".format(user.name, user.discriminator)
-        msg = "\n".join(set(msg.split("\n"))) # remove dupes
+                    if user.game.name is not None:
+                        if user.game.name.lower() == game.lower():
+                            msg += "{}#{}\n".format(user.name, user.discriminator)
+        msg = "\n".join(set(msg.split("\n")))  # remove dupes
         if len(msg) > 1500:
             gist = PythonGists.Gist(description="Number of people playing {}".format(game), content=msg, name="Output")
-            await self.bot.send_message(ctx.message.channel, "{}Large output posted to Gist: {}".format(bot_prefix, gist))
+            await ctx.send("{}Large output posted to Gist: {}".format(self.bot.bot_prefix, gist))
         elif len(msg) == 0:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + "Nobody is playing that game!")
+            await ctx.send(self.bot.bot_prefix + "Nobody is playing that game!")
         else:
             embed = discord.Embed(title="Number of people playing {}".format(game), description=msg)
-            await self.bot.send_message(ctx.message.channel, "", embed=embed)
+            await ctx.send("", embed=embed)
+            
+    @commands.command(pass_context=True, aliases=['anim'])
+    async def animate(self, ctx, animation):
+        """Play an animation from a text file. >help animate for more details.
+        >animate <animation> - Animate a text file.
+        Animation text files are stored in the anims folder. Each frame of animation is put on a new line.
+
+        An example text file looks like this:
+        family
+        fam ily
+        fam i ly
+        fam i love y
+        fam i love you
+
+        You can additionally add a number to the top of the file to denote the delay between each frame. The default is 0.2 seconds.
+        1
+        fam
+        fam i
+        fam i love
+        fam i love you
+        """
+        try:
+            with open("anims/{}.txt".format(animation)) as f:
+                anim = f.read().split("\n")
+        except IOError:
+            return await ctx.send(self.bot.bot_prefix + "You don't have that animation in your anims folder!")
+        if anim:
+            try:
+                delay = float(anim[0])
+                for frame in anim[1:]:
+                    await ctx.message.edit(content=frame)
+                    await asyncio.sleep(delay)
+            except ValueError:
+                for frame in anim:
+                    await ctx.message.edit(content=frame)
+                    await asyncio.sleep(0.2)
+
+    @commands.command(pass_context=True)
+    async def roles(self, ctx, *, user=None):
+        """Check the roles of a user."""
+        await ctx.message.delete()
+        if not user:
+            member = ctx.message.author
+        else:
+            member = get_user(ctx.message, user)
+        if not member:
+            await ctx.send(self.bot.bot_prefix + "That user couldn't be found. Please check your spelling and try again.")
+        elif len(member.roles[1:]) >= 1:
+            embed = discord.Embed(title="{}'s roles".format(member.name), description="\n".join([x.name for x in member.roles[1:]]), colour=member.colour)
+            await ctx.send("", embed=embed)
+        else:
+            await ctx.send(self.bot.bot_prefix + "That user has no roles!")
+
+    @commands.command(pass_context=True)
+    async def messagedump(self, ctx, limit, filename, details="yes", reverse="no"):
+        """Dump messages."""
+        await ctx.message.delete()
+        await ctx.send(self.bot.bot_prefix + "Downloading messages...")
+        if not os.path.isdir('message_dump'):
+            os.mkdir('message_dump')
+        with open("message_dump/" + filename.rsplit('.', 1)[0] + ".txt", "w+", encoding="utf-8") as f:
+            if reverse == "yes":
+                if details == "yes":
+                    async for message in ctx.message.channel.history(limit=int(limit)):
+                        f.write("<{} at {} on {}> {}\n".format(message.author.name, message.created_at.strftime('%d %b %Y'), message.created_at.strftime('%H:%M:%S'), message.content))
+
+                else:
+                    async for message in ctx.message.channel.history(limit=int(limit)):
+                        f.write(message.content + "\n")
+            else:
+                if details == "yes":
+                    async for message in ctx.message.channel.history(limit=int(limit), reverse=True):
+                        f.write("<{} at {} on {}> {}\n".format(message.author.name, message.created_at.strftime('%d %b %Y'), message.created_at.strftime('%H:%M:%S'), message.content))
+
+                else:
+                    async for message in ctx.message.channel.history(limit=int(limit), reverse=True):
+                        f.write(message.content + "\n")
+        await ctx.send(self.bot.bot_prefix + "Finished downloading!")
+
+    @commands.group(pass_context=True)
+    async def link(self, ctx):
+        """Shorten/lengthen URLs"""
+        await ctx.message.delete()
+        if ctx.invoked_subcommand is None:
+            await ctx.send(self.bot.bot_prefix + "Usage: `link <shorten/lengthen> <url>`")
+
+    @link.command(pass_context=True)
+    async def shorten(self, ctx, url):
+        try:
+            r = requests.get(url).status_code
+        except requests.exceptions.RequestException:
+            r = 404
+        if r == 200:
+            params = {
+                "access_token": "757c24db53fac6a6a994439da41bdbbe325dfb99",
+                "longUrl": url
+            }
+            response = requests.get("https://api-ssl.bitly.com/v3/shorten", params=params)
+            if response.status_code == 200:
+                await ctx.send(self.bot.bot_prefix + "<{}>".format(response.json()["data"]["url"]))
+            else:
+                await ctx.send(self.bot.bot_prefix + "There was an error shortening your URL.")
+        else:
+            await ctx.send(self.bot.bot_prefix + "You did not enter a valid URL.")
+
+    @link.command(pass_context=True)
+    async def lengthen(self, ctx, url):
+        try:
+            r = requests.get(url).status_code
+        except requests.exceptions.RequestException:
+            r = 404
+        if r == 200:
+            await ctx.send(self.bot.bot_prefix + "<{}>".format(requests.get(url).url))
+        else:
+            await ctx.send(self.bot.bot_prefix + "You did not enter a valid URL.")
+
+    @commands.command(pass_context=True, aliases=['getcolor'])
+    async def getcolour(self, ctx, colour_code):
+        """Posts color of given hex"""
+        await ctx.message.delete()
+        if not colour_code.startswith("#"):
+            colour_code = "#" + colour_code
+        image = Image.new("RGB", (200, 200), colour_code)
+        image.save("colour_file.png")
+        await ctx.send("Colour with hex code {}:".format(colour_code), file=discord.File("colour_file.png"))
+        os.remove("colour_file.png")
+
+    @commands.has_permissions(add_reactions=True)
+    @commands.command(pass_context=True)
+    async def rpoll(self, ctx, *, msg):
+        """Create a poll using reactions. >help rpoll for more information.
+        >rpoll <question> | <answer> | <answer> - Create a poll. You may use as many answers as you want, placing a pipe | symbol in between them.
+        Example:
+        >rpoll What is your favorite anime? | Steins;Gate | Naruto | Attack on Titan | Shrek
+        You can also use the "time" flag to set the amount of time in seconds the poll will last for.
+        Example:
+        >rpoll What time is it? | HAMMER TIME! | SHOWTIME! | time=10
+        """
+        await ctx.message.delete()
+        options = msg.split(" | ")
+        time = [x for x in options if x.startswith("time=")]
+        if time:
+            time = time[0]
+        if time:
+            options.remove(time)
+        if len(options) <= 1:
+            raise commands.errors.MissingRequiredArgument
+        if len(options) >= 11:
+            return await ctx.send(self.bot.bot_prefix + "You must have 9 options or less.")
+        if time:
+            time = int(time.strip("time="))
+        else:
+            time = 30
+        emoji = ['1⃣', '2⃣', '3⃣', '4⃣', '5⃣', '6⃣', '7⃣', '8⃣', '9⃣']
+        to_react = []
+        confirmation_msg = "Poll for {}:\n\n".format(options[0])
+        for idx, option in enumerate(options[1:]):
+            confirmation_msg += "{} - {}\n".format(emoji[idx], option)
+            to_react.append(emoji[idx])
+        confirmation_msg += "\n\nYou have {} seconds to vote!".format(time)
+        poll_msg = await ctx.send(confirmation_msg)
+        for emote in to_react:
+            await poll_msg.add_reaction(emote)
+        await asyncio.sleep(time)
+        async for message in ctx.message.channel.history():
+            if message.id == poll_msg.id:
+                poll_msg = message
+        results = {}
+        for reaction in poll_msg.reactions:
+            if reaction.emoji in to_react:
+                results[reaction.emoji] = reaction.count - 1
+        end_msg = "The poll is over. The results:\n\n"
+        for result in results:
+            end_msg += "{} {} - {} votes\n".format(result, options[emoji.index(result)+1], results[result])
+        top_result = max(results, key=lambda key: results[key])
+        if len([x for x in results if results[x] == results[top_result]]) > 1:
+            top_results = []
+            for key, value in results.items():
+                if value == results[top_result]:
+                    top_results.append(options[emoji.index(key)+1])
+            end_msg += "\nThe victory is tied between: {}".format(", ".join(top_results))
+        else:
+            top_result = options[emoji.index(top_result)+1]
+            end_msg += "\n{} is the winner!".format(top_result)
+        await ctx.send(end_msg)
+
+    @commands.command(pass_context=True)
+    async def cogs(self, ctx):
+        """Shows loaded/unloaded cogs"""
+        await ctx.message.delete()
+        cogs = ["cogs." + os.path.splitext(f)[0] for f in [os.path.basename(f) for f in glob.glob("cogs/*.py")]]
+        cogs.extend(["custom_cogs." + os.path.splitext(f)[0] for f in [os.path.basename(f) for f in glob.glob("custom_cogs/*.py")]])
+        loaded = [x.__module__.split(".")[1] for x in self.bot.cogs.values()]
+        unloaded = [c.split(".")[1] for c in cogs
+                    if c.split(".")[1] not in loaded]
+        embed = discord.Embed(title="List of installed cogs")
+        if loaded:
+            embed.add_field(name="Loaded", value="\n".join(sorted(loaded)), inline=True)
+        else:
+            embed.add_field(name="Loaded", value="None!", inline=True)
+        if unloaded:
+            embed.add_field(name="Not Loaded", value="\n".join(sorted(unloaded)), inline=True)
+        else:
+            embed.add_field(name="Not Loaded", value="None!", inline=True)
+        embed.set_footer(text="Were you looking for >cog?")
+        await ctx.send("", embed=embed)
+
+    @commands.command(pass_context=True, aliases=['clearconsole', 'cc', 'clear'])
+    async def cleartrace(self, ctx):
+        """Clear the console."""
+        if os.name == 'nt':
+            os.system('cls')
+        else:
+            try:
+                os.system('clear')
+            except:
+                await ctx.send(self.bot.bot_prefix + 'Could not clear console, continuing anyways')
+
+        print('Logged in as')
+        try:
+            print(self.bot.user.name)
+        except:
+            pass
+        print('User id:' + str(self.bot.user.id))
+        print('------')
+        await ctx.send(self.bot.bot_prefix + 'Console cleared successfully.')
+        
+    @commands.command(aliases=['ra'])
+    async def readall(self, ctx):
+        """Marks everything as read."""
+        await ctx.message.delete()
+        for guild in self.bot.guilds:
+            await guild.ack()
+        await ctx.send(self.bot.bot_prefix + "Marked {} guilds as read.".format(len(self.bot.guilds))) 
 
 def setup(bot):
     bot.add_cog(Utility(bot))

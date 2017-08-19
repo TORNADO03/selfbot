@@ -1,9 +1,10 @@
 import discord
+import json
 from discord.ext import commands
-from cogs.utils.checks import *
+from cogs.utils.checks import load_optional_config, embed_perms, get_google_entries
+from cogs.utils.config import get_config_value
 import aiohttp
-from urllib.parse import parse_qs
-from lxml import etree
+import urllib.parse
 
 '''Module for google web and image search.'''
 
@@ -15,7 +16,7 @@ class Google:
         self.bot = bot
 
     def parse_google_card(self, node):
-        if node is None:
+        if node is None or type(node) is int:
             return None
 
         e = discord.Embed(colour=0x0057e7)
@@ -150,49 +151,67 @@ class Google:
         """Google web search. Ex: >g what is discordapp?"""
         if not embed_perms(ctx.message):
             config = load_optional_config()
-            async with aiohttp.get("https://www.googleapis.com/customsearch/v1?q=" + query.replace(' ', '+') + "&start=" + '1' + "&key=" + config['google_api_key'] + "&cx=" + config['custom_search_engine']) as resp:
-                result = json.loads(await resp.text())
-            return await self.bot.send_message(ctx.message.channel, result['items'][0]['link'])
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://www.googleapis.com/customsearch/v1?q=" + urllib.parse.quote_plus(query) + "&start=" + '1' + "&key=" + config['google_api_key'] + "&cx=" + config['custom_search_engine']) as resp:
+                    result = json.loads(await resp.text())
+            return await ctx.send(result['items'][0]['link'])
+
         try:
             entries, root = await get_google_entries(query)
             card_node = root.find(".//div[@id='topstuff']")
             card = self.parse_google_card(card_node)
         except RuntimeError as e:
-            await self.bot.send_message(ctx.message.channel, str(e))
+            await ctx.send(str(e))
         else:
             if card:
                 value = '\n'.join(entries[:2])
                 if value:
                     card.add_field(name='Search Results', value=value, inline=False)
-                return await self.bot.send_message(ctx.message.channel, embed=card)
+                return await ctx.send(embed=card)
             if len(entries) == 0:
-                return await self.bot.send_message(ctx.message.channel, 'No results.')
+                return await ctx.send('No results.')
             next_two = entries[1:3]
             if next_two:
                 formatted = '\n'.join(map(lambda x: '<%s>' % x, next_two))
                 msg = '{}\n\n**See also:**\n{}'.format(entries[0], formatted)
             else:
                 msg = entries[0]
-            await self.bot.send_message(ctx.message.channel, msg)
+            await ctx.send(msg)
 
-    @commands.command(pass_context=True)
+    @commands.command(pass_context=True, aliases=['image', 'img'])
     async def i(self, ctx, *, query):
         """Google image search. >i Lillie pokemon sun and moon"""
+        await ctx.message.delete()
         config = load_optional_config()
         if query[0].isdigit():
             item = int(query[0])
             query = query[1:]
         else:
             item = 0
-        async with aiohttp.get("https://www.googleapis.com/customsearch/v1?q=" + query.replace(' ', '+') + "&start=" + '1' + "&key=" + config['google_api_key'] + "&cx=" + config['custom_search_engine'] + "&searchType=image") as resp:
-            if resp.status != 200:
-                await self.bot.send_message(ctx.message.channel, 'Google failed to respond.')
-            result = json.loads(await resp.text())
-            em = discord.Embed()
-            if embed_perms(ctx.message):
-                await self.bot.send_message(ctx.message.channel, content=None, embed=em.set_image(url=result['items'][item]['link']))
-            else:
-                await self.bot.send_message(ctx.message.channel, result['items'][item]['link'])
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://www.googleapis.com/customsearch/v1?q=" + urllib.parse.quote_plus(query) + "&start=" + '1' + "&key=" + config['google_api_key'] + "&cx=" + config['custom_search_engine'] + "&searchType=image") as resp:
+                if resp.status != 200:
+                    if not config['google_api_key'] or not config['custom_search_engine']:
+                        return await ctx.send(self.bot.bot_prefix + "You don't seem to have image searching configured properly. Refer to the wiki for details.")
+                    return await ctx.send(self.bot.bot_prefix + 'Google failed to respond.')
+                else:
+                    result = json.loads(await resp.text())
+                    try:
+                        result['items']
+                    except:
+                        return await ctx.send(self.bot.bot_prefix + 'There were no results to your search. Use more common search query or make sure you have image search enabled for your custom search engine.')
+                    if len(result['items']) < 1:
+                        return await ctx.send(self.bot.bot_prefix + 'There were no results to your search. Use more common search query or make sure you have image search enabled for your custom search engine.')
+                    em = discord.Embed()
+                    if embed_perms(ctx.message):
+                        em.set_image(url=result['items'][item]['link'])
+                        show_search = get_config_value("optional_config", "show_search_term")
+                        if show_search == "True":
+                            em.set_footer(text="Search term: \"" + query + "\"")
+                        await ctx.send(content=None, embed=em)
+                    else:
+                        await ctx.send(result['items'][item]['link'])
+                        await ctx.send("Search term: \"" + query + "\"")
 
 
 def setup(bot):

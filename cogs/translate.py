@@ -1,9 +1,11 @@
 import requests
+import discord
+import json
+import codecs
 from urllib import parse
 from bs4 import BeautifulSoup
-from appuselfbot import bot_prefix
 from discord.ext import commands
-from cogs.utils.checks import *
+
 
 '''Translator cog - Love Archit & Lyric'''
 
@@ -21,7 +23,12 @@ class Translate:
         >translate <new language> <words> - Translate words from one language to another. Full language names must be used.
         The original language will be assumed automatically.
         """
-        await self.bot.delete_message(ctx.message)
+        await ctx.message.delete()
+        if to_language == "rot13":  # little easter egg
+            embed = discord.Embed(color=discord.Color.blue())
+            embed.add_field(name="Original", value=msg, inline=False)
+            embed.add_field(name="ROT13", value=codecs.encode(msg, "rot_13"), inline=False)
+            return await ctx.send("", embed=embed)
         codes = requests.get("http://lyricly.tk/langs.json").text
         lang_codes = json.loads(codes)
         real_language = False
@@ -37,12 +44,12 @@ class Translate:
             result = BeautifulSoup(result, "lxml").text
             embed = discord.Embed(color=discord.Color.blue())
             embed.add_field(name="Original", value=msg, inline=False)
-            embed.add_field(name=language, value=result.replace("&amp;","&"), inline=False)
+            embed.add_field(name=language, value=result.replace("&amp;", "&"), inline=False)
             if result == msg:
                 embed.add_field(name="Warning", value="This language may not be supported by Google Translate.")
-            await self.bot.send_message(ctx.message.channel, "", embed=embed)
+            await ctx.send("", embed=embed)
         else:
-            await self.bot.send_message(ctx.message.channel, bot_prefix + "That's not a real language.")
+            await ctx.send(self.bot.bot_prefix + "That's not a real language.")
 
 
 def setup(bot):
